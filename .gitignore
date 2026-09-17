@@ -1,0 +1,11 @@
+# Root project ignores
+.env
+.env.*
+backend/.env
+backend/.env.*
+
+# Node
+node_modules/
+
+# Logs
+*.log

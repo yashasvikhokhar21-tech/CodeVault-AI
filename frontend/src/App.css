@@ -1,0 +1,25 @@
+/* App.css */
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* Optional global scrollbar styling */
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0d1117;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #484f58;
+}
