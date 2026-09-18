@@ -111,15 +111,265 @@ function PullRequestPanel({ repoId, currentBranch }) {
   const [form, setForm] = useState({ title: "", description: "", sourceBranch: currentBranch, targetBranch: "main" });
   const [comment, setComment] = useState("");
   const [error, setError] = useState("");
+  const [aiReview, setAiReview] = useState({ loading: false, error: "", data: null });
+
   const load = () => Promise.all([api.get(`/repo/${repoId}/pulls`), api.get(`/repo/${repoId}/branches`)]).then(([prs, branchResponse]) => { setPullRequests(prs.data || []); setBranches(branchResponse.data || []); }).catch((err) => setError(err.response?.data?.error || "Could not load pull requests."));
   useEffect(load, [repoId]);
   useEffect(() => setForm((current) => ({ ...current, sourceBranch: currentBranch })), [currentBranch]);
+
   const create = async (event) => { event.preventDefault(); try { await api.post(`/repo/${repoId}/pulls`, form); setForm({ title: "", description: "", sourceBranch: currentBranch, targetBranch: "main" }); setError(""); await load(); } catch (err) { setError(err.response?.data?.error || "Could not create pull request."); } };
-  const open = async (pullRequest) => { try { setSelected((await api.get(`/repo/${repoId}/pulls/${pullRequest.id}`)).data); setDiff(null); setError(""); } catch (err) { setError(err.response?.data?.error || "Could not load pull request."); } };
+  const open = async (pullRequest) => { try { setSelected((await api.get(`/repo/${repoId}/pulls/${pullRequest.id}`)).data); setDiff(null); setAiReview({ loading: false, error: "", data: null }); setError(""); } catch (err) { setError(err.response?.data?.error || "Could not load pull request."); } };
   const showDiff = async (file) => { try { setDiff((await api.get(`/repo/${repoId}/pulls/${selected.id}/diff`, { params: { path: file.path } })).data); } catch (err) { setError(err.response?.data?.error || "Could not load pull request diff."); } };
   const updateStatus = async (action) => { try { const response = await api({ method: action === "merge" ? "post" : "patch", url: `/repo/${repoId}/pulls/${selected.id}/${action}` }); setSelected(response.data); await load(); } catch (err) { setError(err.response?.data?.error || `Could not ${action} pull request.`); } };
   const addComment = async (event) => { event.preventDefault(); try { await api.post(`/repo/${repoId}/pulls/${selected.id}/comments`, { text: comment }); setComment(""); await open(selected); } catch (err) { setError(err.response?.data?.error || "Could not add comment."); } };
-  return <section className="pull-request-panel"><div className="section-heading"><div><p className="eyebrow">COLLABORATION</p><h2>Pull Requests</h2></div></div>{error && <div className="repo-message error">{error}</div>}{selected ? <div className="pull-request-detail"><button type="button" className="button button-secondary" onClick={() => { setSelected(null); setDiff(null); }}>Back to pull requests</button><h3>#{selected.number} {selected.title}</h3><p>{selected.sourceBranch} → {selected.targetBranch}</p><p>{selected.description || "No description."}</p><p>{selected.status} · {selected.files?.length || 0} files changed · {selected.commits?.length || 0} commits</p>{selected.conflicts?.length > 0 && <div className="repo-message error">CONFLICTS DETECTED: {selected.conflicts.join(", ")}</div>}<div className="pull-request-files">{(selected.files || []).map((file) => <button type="button" key={file.path} onClick={() => showDiff(file)}><span>{file.status[0]}</span>{file.path}</button>)}</div>{diff && <div className="diff-viewer"><h4>{diff.path}</h4>{diff.binary ? <p>Binary file cannot be displayed as text.</p> : diff.lines.map((line, index) => <div className={`diff-line ${line.type}`} key={`${line.type}-${index}`}><span>{line.type === "added" ? "+" : line.type === "deleted" ? "-" : " "}</span>{line.text}</div>)}</div>}<div className="pull-request-actions">{selected.status === "OPEN" && <><button className="button button-secondary" onClick={() => updateStatus("close")}>Close Pull Request</button><button className="button button-primary" disabled={Boolean(selected.conflicts?.length)} onClick={() => window.confirm("Merge this pull request?") && updateStatus("merge")}>Merge Pull Request</button></>}</div><div className="pull-request-comments"><h4>Comments</h4>{(selected.comments || []).map((item) => <p key={item._id}>{item.author?.username || "User"}: {item.text} <small>{new Date(item.createdAt).toLocaleString()}</small></p>)}<form onSubmit={addComment}><input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Leave a comment" /><button className="button button-secondary" disabled={!comment.trim()}>Comment</button></form></div></div> : <><form className="pull-request-create" onSubmit={create}><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Pull request title" required /><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Description (optional)" /><select value={form.targetBranch} onChange={(event) => setForm({ ...form, targetBranch: event.target.value })}>{branches.map((branch) => <option key={branch.name}>{branch.name}</option>)}</select><select value={form.sourceBranch} onChange={(event) => setForm({ ...form, sourceBranch: event.target.value })}>{branches.map((branch) => <option key={branch.name}>{branch.name}</option>)}</select><button className="button button-primary" disabled={!form.title.trim() || form.sourceBranch === form.targetBranch}>New Pull Request</button></form><div className="pull-request-list">{pullRequests.map((pullRequest) => <button type="button" key={pullRequest.id} onClick={() => open(pullRequest)}><strong>{pullRequest.status}</strong><span>#{pullRequest.number} {pullRequest.title}</span><small>{pullRequest.sourceBranch} → {pullRequest.targetBranch}</small></button>)}</div></>}</section>;
+
+  const runAiReview = async () => {
+    if (aiReview.loading || !selected) return;
+    setAiReview({ loading: true, error: "", data: null });
+    try {
+      const response = await api.post(`/repo/${repoId}/pulls/${selected.id}/ai-review`);
+      setAiReview({ loading: false, error: "", data: response.data });
+    } catch (err) {
+      setAiReview({
+        loading: false,
+        error: err.response?.data?.error || "Could not generate AI review. Please try again.",
+        data: null,
+      });
+    }
+  };
+
+  const issues = (aiReview.data?.findings || []).filter((f) => f.severity !== "INFO");
+  const suggestions = (aiReview.data?.findings || []).filter((f) => f.severity === "INFO");
+  const positiveFindings = aiReview.data?.positiveFindings || [];
+
+  const severityIcon = (sev) => {
+    switch (sev) {
+      case "CRITICAL":
+      case "HIGH":
+        return "🔴";
+      case "MEDIUM":
+        return "🟠";
+      case "LOW":
+        return "🟡";
+      default:
+        return "💡";
+    }
+  };
+
+  return (
+    <section className="pull-request-panel">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">COLLABORATION</p>
+          <h2>Pull Requests</h2>
+        </div>
+      </div>
+      {error && <div className="repo-message error">{error}</div>}
+      {selected ? (
+        <div className="pull-request-detail">
+          <button type="button" className="button button-secondary" onClick={() => { setSelected(null); setDiff(null); setAiReview({ loading: false, error: "", data: null }); }}>
+            Back to pull requests
+          </button>
+          <h3>#{selected.number} {selected.title}</h3>
+          <p>{selected.sourceBranch} → {selected.targetBranch}</p>
+          <p>{selected.description || "No description."}</p>
+          <p>{selected.status} · {selected.files?.length || 0} files changed · {selected.commits?.length || 0} commits</p>
+          {selected.conflicts?.length > 0 && <div className="repo-message error">CONFLICTS DETECTED: {selected.conflicts.join(", ")}</div>}
+          <div className="pull-request-files">
+            {(selected.files || []).map((file) => (
+              <button type="button" key={file.path} onClick={() => showDiff(file)}>
+                <span>{file.status[0]}</span>{file.path}
+              </button>
+            ))}
+          </div>
+          {diff && (
+            <div className="diff-viewer">
+              <h4>{diff.path}</h4>
+              {diff.binary ? (
+                <p>Binary file cannot be displayed as text.</p>
+              ) : (
+                diff.lines.map((line, index) => (
+                  <div className={`diff-line ${line.type}`} key={`${line.type}-${index}`}>
+                    <span>{line.type === "added" ? "+" : line.type === "deleted" ? "-" : " "}</span>{line.text}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+          <div className="pull-request-actions">
+            {selected.status === "OPEN" && (
+              <>
+                <button className="button button-secondary" onClick={() => updateStatus("close")}>Close Pull Request</button>
+                <button className="button button-primary" disabled={Boolean(selected.conflicts?.length)} onClick={() => window.confirm("Merge this pull request?") && updateStatus("merge")}>Merge Pull Request</button>
+              </>
+            )}
+            <button
+              type="button"
+              className="button button-secondary pr-ai-btn"
+              disabled={aiReview.loading}
+              onClick={runAiReview}
+            >
+              <SparkleFillIcon size={14} />
+              {aiReview.loading ? "Analyzing PR diff with Gemini..." : "AI Code Review"}
+            </button>
+          </div>
+
+          {aiReview.error && (
+            <div className="ai-output error-state" style={{ marginTop: "16px" }}>
+              <p>{aiReview.error}</p>
+              <button type="button" className="button button-secondary" onClick={runAiReview}>
+                Retry AI Review
+              </button>
+            </div>
+          )}
+
+          {aiReview.loading && (
+            <div className="pr-ai-loading" style={{ marginTop: "16px", padding: "16px", background: "#151c2e", borderRadius: "8px", border: "1px solid #27324a" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", color: "#8b5cf6" }}>
+                <SparkleFillIcon size={18} />
+                <strong>Gemini is analyzing the changed files in this PR...</strong>
+              </div>
+              <p style={{ margin: "8px 0 0", color: "#94a3b8", fontSize: "13px" }}>
+                Checking for bugs, security vulnerabilities, edge cases, error handling, and performance.
+              </p>
+            </div>
+          )}
+
+          {aiReview.data && (
+            <div className="pr-ai-review-card" style={{ marginTop: "20px" }}>
+              <div className="pr-ai-card-header">
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <SparkleFillIcon size={18} style={{ color: "#8b5cf6" }} />
+                  <h4>AI Code Review</h4>
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button type="button" className="button button-secondary" onClick={runAiReview} disabled={aiReview.loading}>
+                    Re-run
+                  </button>
+                  <button type="button" className="button button-secondary" onClick={() => setAiReview({ loading: false, error: "", data: null })}>
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+
+              <div className="pr-ai-section">
+                <h5>Summary</h5>
+                <p className="pr-ai-summary">{aiReview.data.summary}</p>
+              </div>
+
+              <div className="pr-ai-section">
+                <h5>Issues Found</h5>
+                {issues.length === 0 ? (
+                  <p className="pr-ai-none">No critical, high, or medium issues detected in this pull request.</p>
+                ) : (
+                  <div className="pr-ai-issues-list">
+                    {issues.map((issue, idx) => (
+                      <div className={`pr-ai-issue-item sev-${issue.severity.toLowerCase()}`} key={`issue-${idx}`}>
+                        <div className="pr-ai-issue-header">
+                          <span className="pr-ai-sev-tag">
+                            {severityIcon(issue.severity)} {issue.severity}
+                          </span>
+                          {issue.file && (
+                            <span className="pr-ai-file-tag">
+                              📄 {issue.file}{issue.line ? ` : line ${issue.line}` : ""}
+                            </span>
+                          )}
+                        </div>
+                        <div className="pr-ai-issue-title">{issue.title}</div>
+                        <p className="pr-ai-issue-desc">{issue.description}</p>
+                        {issue.suggestion && (
+                          <div className="pr-ai-fix-box">
+                            <strong>💡 Suggested fix:</strong>
+                            <p>{issue.suggestion}</p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {suggestions.length > 0 && (
+                <div className="pr-ai-section">
+                  <h5>Suggestions</h5>
+                  <div className="pr-ai-suggestions-list">
+                    {suggestions.map((sug, idx) => (
+                      <div className="pr-ai-suggestion-item" key={`sug-${idx}`}>
+                        <div className="pr-ai-issue-header">
+                          <span className="pr-ai-sev-tag">💡 INFO</span>
+                          {sug.file && (
+                            <span className="pr-ai-file-tag">
+                              📄 {sug.file}{sug.line ? ` : line ${sug.line}` : ""}
+                            </span>
+                          )}
+                        </div>
+                        <div className="pr-ai-issue-title">{sug.title}</div>
+                        <p className="pr-ai-issue-desc">{sug.description}</p>
+                        {sug.suggestion && (
+                          <div className="pr-ai-fix-box">
+                            <strong>💡 Recommended approach:</strong>
+                            <p>{sug.suggestion}</p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {positiveFindings.length > 0 && (
+                <div className="pr-ai-section">
+                  <h5>Positive Findings</h5>
+                  <ul className="pr-ai-positive-list">
+                    {positiveFindings.map((finding, idx) => (
+                      <li key={`pos-${idx}`}>
+                        <span className="pr-ai-check">✓</span>
+                        <span>{finding}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="pull-request-comments">
+            <h4>Comments</h4>
+            {(selected.comments || []).map((item) => (
+              <p key={item._id}>{item.author?.username || "User"}: {item.text} <small>{new Date(item.createdAt).toLocaleString()}</small></p>
+            ))}
+            <form onSubmit={addComment}>
+              <input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Leave a comment" />
+              <button className="button button-secondary" disabled={!comment.trim()}>Comment</button>
+            </form>
+          </div>
+        </div>
+      ) : (
+        <>
+          <form className="pull-request-create" onSubmit={create}>
+            <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Pull request title" required />
+            <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Description (optional)" />
+            <select value={form.targetBranch} onChange={(event) => setForm({ ...form, targetBranch: event.target.value })}>
+              {branches.map((branch) => <option key={branch.name}>{branch.name}</option>)}
+            </select>
+            <select value={form.sourceBranch} onChange={(event) => setForm({ ...form, sourceBranch: event.target.value })}>
+              {branches.map((branch) => <option key={branch.name}>{branch.name}</option>)}
+            </select>
+            <button className="button button-primary" disabled={!form.title.trim() || form.sourceBranch === form.targetBranch}>New Pull Request</button>
+          </form>
+          <div className="pull-request-list">
+            {pullRequests.map((pullRequest) => (
+              <button type="button" key={pullRequest.id} onClick={() => open(pullRequest)}>
+                <strong>{pullRequest.status}</strong>
+                <span>#{pullRequest.number} {pullRequest.title}</span>
+                <small>{pullRequest.sourceBranch} → {pullRequest.targetBranch}</small>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 const Repo = () => {

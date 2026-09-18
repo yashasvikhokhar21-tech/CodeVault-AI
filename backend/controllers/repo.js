@@ -10,6 +10,7 @@ const Repository = require("../models/repoModel.js");
 const User = require("../models/userModel.js");
 const Issue = require("../models/issueModel.js");
 const PullRequest = require("../models/pullRequestModel.js");
+const { reviewPullRequestDiff, redactSecrets, AIError } = require("../services/aiService.js");
 const execFileAsync = promisify(execFile);
 
 const commandEntry = path.resolve(__dirname, "../index.js");
@@ -508,6 +509,99 @@ async function getPullRequestDiff(req, res) {
   } catch (err) { console.error("Error during pull request diff:", err.message); res.status(500).json({ error: "Could not load pull request diff." }); }
 }
 
+function isSensitivePath(filePath) {
+  const base = path.basename(filePath).toLowerCase();
+  if (base === ".env" || base.startsWith(".env.")) return true;
+  if (base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12") || base.endsWith(".pfx")) return true;
+  if (base === "id_rsa" || base === "id_ed25519" || base === "id_ecdsa") return true;
+  return false;
+}
+
+const MAX_PR_DIFF_CHARS = 24000;
+
+async function reviewPullRequest(req, res) {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id) || !mongoose.Types.ObjectId.isValid(req.params.pullId)) {
+      return res.status(404).json({ error: "Repository or pull request not found." });
+    }
+    const repository = await Repository.findById(req.params.id);
+    const pullRequest = await PullRequest.findOne({ _id: req.params.pullId, repository: req.params.id });
+    if (!repository || !pullRequest) return res.status(404).json({ error: "Pull request not found." });
+    if (!await repositoryAccess(req, repository)) return res.status(403).json({ error: "You are not authorized to view this pull request." });
+
+    const context = await pullRequestContext(repository, pullRequest.sourceBranch, pullRequest.targetBranch);
+    if (!context) return res.status(409).json({ error: "A pull request branch no longer exists." });
+
+    const comparison = compareSnapshots(context.base, context.targetSnapshot?.files || new Map(), context.sourceSnapshot?.files || new Map());
+    if (!comparison.files.length) {
+      return res.status(400).json({ error: "No changed files found in this pull request to review." });
+    }
+
+    const diffChunks = [];
+    for (const file of comparison.files) {
+      if (isSensitivePath(file.path)) {
+        diffChunks.push(`--- a/${file.path}\n+++ b/${file.path} (${file.status})\n[File omitted: sensitive configuration file]`);
+        continue;
+      }
+      const current = context.sourceSnapshot?.files.get(file.path);
+      const parent = context.targetSnapshot?.files.get(file.path);
+      const isBinary = (buffer) => buffer && buffer.includes(0);
+      if (isBinary(current) || isBinary(parent)) {
+        diffChunks.push(`--- a/${file.path}\n+++ b/${file.path} (${file.status})\n[Binary file: diff omitted]`);
+        continue;
+      }
+
+      const rows = lineDiff(parent ? parent.toString("utf8") : "", current ? current.toString("utf8") : "");
+      let parentLine = 0;
+      let currentLine = 0;
+      const formattedLines = [];
+      for (const row of rows) {
+        if (row.type === "context") {
+          parentLine += 1;
+          currentLine += 1;
+          formattedLines.push(`  L${currentLine}: ${row.text}`);
+        } else if (row.type === "added") {
+          currentLine += 1;
+          formattedLines.push(`+ L${currentLine}: ${row.text}`);
+        } else if (row.type === "deleted") {
+          parentLine += 1;
+          formattedLines.push(`- L${parentLine} (old): ${row.text}`);
+        }
+      }
+      diffChunks.push(`--- a/${file.path}\n+++ b/${file.path} (${file.status})\n${formattedLines.join("\n")}`);
+    }
+
+    const combinedDiff = diffChunks.join("\n\n");
+    const sanitizedDiff = redactSecrets(combinedDiff);
+
+    if (!sanitizedDiff.trim()) {
+      return res.status(400).json({ error: "No changed code found in this pull request to review." });
+    }
+
+    if (sanitizedDiff.length > MAX_PR_DIFF_CHARS) {
+      return res.status(400).json({
+        error: "The pull request diff is too large for AI review. Please review changes in smaller pull requests.",
+      });
+    }
+
+    const review = await reviewPullRequestDiff({
+      title: pullRequest.title,
+      description: pullRequest.description,
+      sourceBranch: pullRequest.sourceBranch,
+      targetBranch: pullRequest.targetBranch,
+      diff: sanitizedDiff,
+    });
+
+    res.json(review);
+  } catch (err) {
+    if (err instanceof AIError) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    console.error("Error during pull request AI review:", err.message);
+    res.status(500).json({ error: "Could not generate AI code review." });
+  }
+}
+
 async function closePullRequest(req, res) {
   try {
     const repository = await Repository.findById(req.params.id);
@@ -798,6 +892,7 @@ module.exports = {
   getPullRequest,
   addPullRequestComment,
   getPullRequestDiff,
+  reviewPullRequest,
   closePullRequest,
   mergePullRequest,
     getAllRepositories,

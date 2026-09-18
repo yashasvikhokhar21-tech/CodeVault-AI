@@ -76,6 +76,7 @@ repoRouter.post("/repo/:id/pulls", requireAuth, repoController.createPullRequest
 repoRouter.get("/repo/:id/pulls/:pullId", requireAuth, repoController.getPullRequest);
 repoRouter.post("/repo/:id/pulls/:pullId/comments", requireAuth, repoController.addPullRequestComment);
 repoRouter.get("/repo/:id/pulls/:pullId/diff", requireAuth, repoController.getPullRequestDiff);
+repoRouter.post("/repo/:id/pulls/:pullId/ai-review", requireAuth, repoController.reviewPullRequest);
 repoRouter.patch("/repo/:id/pulls/:pullId/close", requireAuth, repoController.closePullRequest);
 repoRouter.post("/repo/:id/pulls/:pullId/merge", requireAuth, repoController.mergePullRequest);
 
