@@ -1,14 +1,19 @@
-const fs = require("fs").promises;
-const path = require("path");
 const mongoose = require("mongoose");
 const Repository = require("../models/repoModel.js");
 const Issue = require("../models/issueModel.js");
-const { generateCommitMessage, reviewCode, analyzeIssue, chat, AIError, limitContext } = require("../services/aiService.js");
+const { getRepositoryChangeDiff } = require("./repo.js");
+const { generateCommitMessage, reviewCode, analyzeIssue, chat, AIError } = require("../services/aiService.js");
 
 function handleError(res, error) {
-  if (error instanceof AIError) return res.status(error.status).json({ error: error.message });
-  console.error("AI request failed:", error.message);
+  if (error instanceof AIError) return res.status(error.status).json({ error: error.message, code: error.code, retryAfterMs: error.retryAfterMs, ...(error.quota ? { quota: error.quota } : {}) });
+  console.error("AI request failed:", error.name || "Error", error.status || "unknown status");
   return res.status(500).json({ error: "The AI request could not be completed." });
+}
+
+function requireDatabase(res) {
+  if (mongoose.connection.readyState === 1) return false;
+  res.status(503).json({ error: "Repository storage is temporarily unavailable. Please retry shortly.", code: "DATABASE_UNAVAILABLE" });
+  return true;
 }
 
 async function getOwnedRepository(repoId, userId) {
@@ -16,38 +21,31 @@ async function getOwnedRepository(repoId, userId) {
   return Repository.findOne({ _id: repoId, owner: userId }).populate("issues");
 }
 
-async function getStagedContext(repository) {
-  const stagingPath = path.resolve(process.cwd(), ".hiddenGit", "staging");
-  let files = [];
-  try { files = await fs.readdir(stagingPath); } catch { /* The repository may not have staged files yet. */ }
-  const staged = [];
-  for (const file of files.slice(0, 80)) {
-    try {
-      const content = await fs.readFile(path.join(stagingPath, file), "utf8");
-      staged.push(`--- ${file} ---\n${content}`);
-    } catch { /* Skip unreadable staged files. */ }
-  }
-  return limitContext(`Repository: ${repository.name}\nDescription: ${repository.description || ""}\n\n${staged.join("\n\n") || "No staged files were found. The repository has no available staged diff."}`);
-}
-
 async function commitMessage(req, res) {
   try {
+    if (requireDatabase(res)) return;
     const repository = await getOwnedRepository(req.params.repoId, req.user.id);
     if (!repository) return res.status(404).json({ error: "Repository not found or access denied." });
-    res.json({ message: await generateCommitMessage(await getStagedContext(repository)) });
+    const branch = typeof req.body?.branch === "string" ? req.body.branch : "main";
+    const diff = await getRepositoryChangeDiff(repository, branch);
+    res.json({ message: await generateCommitMessage(diff) });
   } catch (error) { handleError(res, error); }
 }
 
 async function codeReview(req, res) {
   try {
+    if (requireDatabase(res)) return;
     const repository = await getOwnedRepository(req.params.repoId, req.user.id);
     if (!repository) return res.status(404).json({ error: "Repository not found or access denied." });
-    res.json(await reviewCode(await getStagedContext(repository)));
+    const branch = typeof req.body?.branch === "string" ? req.body.branch : "main";
+    const diff = await getRepositoryChangeDiff(repository, branch);
+    res.json(await reviewCode(diff));
   } catch (error) { handleError(res, error); }
 }
 
 async function issueAnalysis(req, res) {
   try {
+    if (requireDatabase(res)) return;
     if (!mongoose.Types.ObjectId.isValid(req.params.issueId)) return res.status(404).json({ error: "Issue not found or access denied." });
     const issue = await Issue.findById(req.params.issueId).populate("repository");
     if (!issue || String(issue.repository?.owner) !== req.user.id) return res.status(404).json({ error: "Issue not found or access denied." });
@@ -59,13 +57,15 @@ async function assistantChat(req, res) {
   try {
     const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
     if (!prompt) return res.status(400).json({ error: "A question is required." });
+    if (prompt.length > 8000) return res.status(400).json({ error: "Questions must be 8,000 characters or fewer." });
     let context = "";
     if (req.body.repositoryId) {
+      if (requireDatabase(res)) return;
       const repository = await getOwnedRepository(req.body.repositoryId, req.user.id);
       if (!repository) return res.status(404).json({ error: "Repository not found or access denied." });
       context = `Repository: ${repository.name}\nDescription: ${repository.description || ""}`;
     }
-    res.json({ response: await chat(prompt, context) });
+    res.json({ response: await chat(prompt, context, req.body?.history) });
   } catch (error) { handleError(res, error); }
 }
 

@@ -5,6 +5,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 var ObjectId = require("mongodb").ObjectId;
 const uri = process.env.MONGODB_URI;
+const isValidObjectId = (value) => ObjectId.isValid(String(value));
 
 let client;
 async function connectClient(){
@@ -16,7 +17,6 @@ async function connectClient(){
 
 
 async function signup(req, res) {
-    console.log("Signup request body:", req.body);
    const { username, password , email } = req.body;
    try{
     await connectClient();
@@ -93,6 +93,10 @@ async function getUserProfile(req, res) {
   const currentID = req.user.id;
 
   try {
+    if (!isValidObjectId(currentID)) {
+      return res.status(404).json({ message: "User not found!" });
+    }
+
     await connectClient();
     const db = client.db("gitHubclone");
     const usersCollection = db.collection("users");
@@ -108,13 +112,17 @@ async function getUserProfile(req, res) {
     res.send(user );
   } catch (err) {
     console.error("Error during fetching : ", err.message);
-    res.status(500).send("Server error!");
+    res.status(500).json({ message: "Could not load profile." });
   }
 }
 
 async function updateUserProfile(req, res) {
   const currentID = req.params.id;
   const { email, fullName, bio, location, company } = req.body;
+
+  if (!isValidObjectId(currentID)) {
+    return res.status(404).json({ message: "User not found!" });
+  }
 
   if (req.user.id !== currentID) {
     return res.status(403).json({ message: "You can only update your own profile." });
@@ -159,6 +167,10 @@ async function deleteUserProfile(req, res) {
   const currentID = req.params.id;
 
   try {
+    if (!isValidObjectId(currentID)) {
+      return res.status(404).json({ message: "User not found!" });
+    }
+
     await connectClient();
     const db = client.db("gitHubclone");
     const usersCollection = db.collection("users");
@@ -174,7 +186,7 @@ async function deleteUserProfile(req, res) {
     res.json({ message: "User Profile Deleted!" });
   } catch (err) {
     console.error("Error during updating : ", err.message);
-    res.status(500).send("Server error!");
+    res.status(500).json({ message: "Could not delete profile." });
   }
 }
 

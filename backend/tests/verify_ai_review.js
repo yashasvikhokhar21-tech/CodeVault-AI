@@ -3,7 +3,7 @@ const path = require("path");
 const fs = require("fs");
 require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
-const { redactSecrets, reviewPullRequestDiff, AIError } = require("../services/aiService.js");
+const { redactSecrets, reviewPullRequestDiff, parseJson, normalizeGeminiError, isTransientGeminiError, buildChatPrompt, AIError } = require("../services/aiService.js");
 
 async function runTests() {
   console.log("=== Starting AI Code Review Verification Suite ===");
@@ -23,7 +23,7 @@ async function runTests() {
   }
 
   // Helper for live Gemini tests with graceful overload/rate limit handling
-  async function callWithRetry(fn, { maxRetries = 2, delay = 2000 } = {}) {
+  async function callWithRetry(fn, { maxRetries = 1, delay = 2000 } = {}) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         return await fn();
@@ -263,6 +263,19 @@ async function runTests() {
 
   // 10. Invalid Gemini response / malformed JSON handling
   await test("10. Invalid Gemini response / malformed JSON handling", async () => {
+    assert.deepStrictEqual(parseJson('```json\n{"findings": []}\n```'), { findings: [] });
+    assert.throws(() => parseJson("not valid JSON"), (err) => err instanceof AIError && err.status === 502);
+    assert.strictEqual(normalizeGeminiError({ status: 429, message: "quota exhausted" }).status, 429);
+    assert.strictEqual(isTransientGeminiError({ status: 429 }), false);
+    assert.strictEqual(isTransientGeminiError({ status: 503 }), true);
+    assert.strictEqual(normalizeGeminiError({ status: 404, message: "model not found" }).status, 400);
+    assert.strictEqual(normalizeGeminiError({ status: 400, message: "API key not valid" }).status, 401);
+    const chatPrompt = buildChatPrompt("next question", "repository context", [
+      { role: "user", content: "previous question" },
+      { role: "assistant", content: "previous answer" },
+    ]);
+    assert(chatPrompt.includes("previous question") && chatPrompt.includes("previous answer"));
+    assert(chatPrompt.includes("next question") && chatPrompt.includes("repository context"));
     const err = new AIError("The AI returned an invalid structured response.", 502);
     assert.strictEqual(err.status, 502);
     assert.strictEqual(err.message, "The AI returned an invalid structured response.");
@@ -280,8 +293,15 @@ async function runTests() {
 
   // 12. Unauthorized user check
   await test("12. Unauthorized user check", async () => {
-    const res = await fetch("http://localhost:3002/repo/123/pulls/456/ai-review", { method: "POST" });
-    assert.strictEqual(res.status, 401);
+    const endpoints = [
+      "/ai/chat",
+      "/ai/repositories/000000000000000000000000/commit-message",
+      "/ai/repositories/000000000000000000000000/review",
+      "/ai/issues/000000000000000000000000/analyze",
+      "/repo/123/pulls/456/ai-review",
+    ];
+    const responses = await Promise.all(endpoints.map((endpoint) => fetch(`http://localhost:3002${endpoint}`, { method: "POST" })));
+    assert(responses.every((response) => response.status === 401), "Every AI endpoint should require authentication");
   });
 
   // 13. Missing PR check

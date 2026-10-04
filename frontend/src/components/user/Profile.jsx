@@ -18,6 +18,7 @@ const Profile = () => {
   const [message, setMessage] = useState({ type: "", text: "" });
   const { logout, currentUser } = useAuth();
   const userId = currentUser;
+  const isValidUserId = (value) => typeof value === "string" && /^[a-fA-F0-9]{24}$/.test(value);
 
   useEffect(() => {
     const load = async () => {
@@ -29,7 +30,8 @@ const Profile = () => {
         setMessage({ type: "error", text: err.response?.data?.message || "Could not load your profile." });
       } finally { setLoading(false); }
     };
-    if (userId) load();
+    if (userId && isValidUserId(userId)) load();
+    else setLoading(false);
   }, [userId]);
 
   const saveProfile = async (event) => {

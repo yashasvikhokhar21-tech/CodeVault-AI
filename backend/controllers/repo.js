@@ -16,6 +16,7 @@ const execFileAsync = promisify(execFile);
 const commandEntry = path.resolve(__dirname, "../index.js");
 const MAX_IMPORT_FILES = 10000;
 const MAX_IMPORT_TOTAL_BYTES = 250 * 1024 * 1024;
+const isValidObjectId = (value) => typeof value === "string" && mongoose.Types.ObjectId.isValid(value);
 const excludedDirectories = new Map([
   ["node_modules", "dependency folder"],
   [".git", "Git metadata"],
@@ -519,10 +520,59 @@ function isSensitivePath(filePath) {
 
 const MAX_PR_DIFF_CHARS = 24000;
 
+async function getRepositoryChangeDiff(repository, branchName) {
+  const snapshots = await repositorySnapshots(repository, branchName);
+  if (!snapshots.length) throw new AIError("No committed changes were found on this branch to review.", 400);
+
+  const currentSnapshot = snapshots.at(-1);
+  const previousFiles = snapshots.at(-2)?.files || new Map();
+  const changedFiles = snapshotDiff(previousFiles, currentSnapshot.files);
+  if (!changedFiles.length) throw new AIError("No changed files were found on this branch to review.", 400);
+
+  const chunks = changedFiles.map((file) => {
+    if (isSensitivePath(file.path)) {
+      return `--- a/${file.path}\n+++ b/${file.path} (${file.status})\n[File omitted: sensitive configuration file]`;
+    }
+
+    const current = currentSnapshot.files.get(file.path);
+    const previous = previousFiles.get(file.path);
+    if ((current && current.includes(0)) || (previous && previous.includes(0))) {
+      return `--- a/${file.path}\n+++ b/${file.path} (${file.status})\n[Binary file: diff omitted]`;
+    }
+
+    const rows = lineDiff(previous ? previous.toString("utf8") : "", current ? current.toString("utf8") : "");
+    let previousLine = 0;
+    let currentLine = 0;
+    const lines = rows.map((row) => {
+      if (row.type === "context") {
+        previousLine += 1;
+        currentLine += 1;
+        return `  L${currentLine}: ${row.text}`;
+      }
+      if (row.type === "added") {
+        currentLine += 1;
+        return `+ L${currentLine}: ${row.text}`;
+      }
+      previousLine += 1;
+      return `- L${previousLine} (old): ${row.text}`;
+    });
+    return `--- a/${file.path}\n+++ b/${file.path} (${file.status})\n${lines.join("\n")}`;
+  });
+
+  const diff = redactSecrets(chunks.join("\n\n"));
+  if (diff.length > MAX_PR_DIFF_CHARS) {
+    throw new AIError("The repository changes are too large for AI review. Please review a smaller commit.", 400);
+  }
+  return diff;
+}
+
 async function reviewPullRequest(req, res) {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id) || !mongoose.Types.ObjectId.isValid(req.params.pullId)) {
       return res.status(404).json({ error: "Repository or pull request not found." });
+    }
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: "Repository storage is temporarily unavailable. Please retry shortly.", code: "DATABASE_UNAVAILABLE" });
     }
     const repository = await Repository.findById(req.params.id);
     const pullRequest = await PullRequest.findOne({ _id: req.params.pullId, repository: req.params.id });
@@ -595,9 +645,9 @@ async function reviewPullRequest(req, res) {
     res.json(review);
   } catch (err) {
     if (err instanceof AIError) {
-      return res.status(err.status).json({ error: err.message });
+      return res.status(err.status).json({ error: err.message, code: err.code, retryAfterMs: err.retryAfterMs, ...(err.quota ? { quota: err.quota } : {}) });
     }
-    console.error("Error during pull request AI review:", err.message);
+    console.error("Error during pull request AI review:", err.name || "Error", err.status || "unknown status");
     res.status(500).json({ error: "Could not generate AI code review." });
   }
 }
@@ -705,6 +755,10 @@ async function getAllRepositories(req, res) {
 async function fetchRepositoryById(req, res) {
   const { id } = req.params;
   try {
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ error: "Repository not found!" });
+    }
+
     const repository = await Repository.findById(id)
       .populate("owner")
       .populate("issues");
@@ -716,7 +770,7 @@ async function fetchRepositoryById(req, res) {
     res.json(repository);
   } catch (err) {
     console.error("Error during fetching repository : ", err.message);
-    res.status(500).send("Server error");
+    res.status(500).json({ error: "Could not load repository." });
   }
 }
 
@@ -740,7 +794,11 @@ async function fetchRepositoriesForCurrentUser(req, res) {
   const { userId } = req.params;
 
   try {
-    const repositories = await Repository.find({ owner: userId })
+    if (!isValidObjectId(userId)) {
+      return res.status(404).json({ error: "User Repositories not found!" });
+    }
+
+    const repositories = await Repository.find({ owner: new mongoose.Types.ObjectId(userId) })
       .populate("owner")
       .populate("issues");
 
@@ -751,7 +809,7 @@ async function fetchRepositoriesForCurrentUser(req, res) {
     res.json({ message: "Repositories found!", repositories });
   } catch (err) {
     console.error("Error during fetching user repositories : ", err.message);
-    res.status(500).send("Server error");
+    res.status(500).json({ error: "Could not load user repositories." });
   }
 }
 
@@ -788,6 +846,10 @@ async function updateRepositoryById(req, res) {
   const { content, description } = req.body;
 
   try {
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ error: "Repository not found!" });
+    }
+
     const repository = await Repository.findById(id);
     if (!repository) {
       return res.status(404).json({ error: "Repository not found!" });
@@ -804,7 +866,7 @@ async function updateRepositoryById(req, res) {
     });
   } catch (err) {
     console.error("Error during updating repository : ", err.message);
-    res.status(500).send("Server error");
+    res.status(500).json({ error: "Could not update repository." });
   }
 }
 
@@ -815,6 +877,10 @@ async function toggleVisibilityById(req, res) {
   const { id } = req.params;
 
   try {
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ error: "Repository not found!" });
+    }
+
     const repository = await Repository.findById(id);
     if (!repository) {
       return res.status(404).json({ error: "Repository not found!" });
@@ -830,7 +896,7 @@ async function toggleVisibilityById(req, res) {
     });
   } catch (err) {
     console.error("Error during toggling visibility : ", err.message);
-    res.status(500).send("Server error");
+    res.status(500).json({ error: "Could not toggle repository visibility." });
   }
 }
 
@@ -839,6 +905,10 @@ async function toggleVisibilityById(req, res) {
 async function deleteRepositoryById(req, res) {
   const { id } = req.params;
   try {
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ error: "Repository not found!" });
+    }
+
     const repository = await Repository.findByIdAndDelete(id);
     if (!repository) {
       return res.status(404).json({ error: "Repository not found!" });
@@ -847,7 +917,7 @@ async function deleteRepositoryById(req, res) {
     res.json({ message: "Repository deleted successfully!" });
   } catch (err) {
     console.error("Error during deleting repository : ", err.message);
-    res.status(500).send("Server error");
+    res.status(500).json({ error: "Could not delete repository." });
   }
 }
 
@@ -855,7 +925,12 @@ async function starRepository(req, res) {
   try {
     const { repoId, userId } = req.params;
 
+    if (!isValidObjectId(repoId) || !isValidObjectId(userId)) {
+      return res.status(400).json({ success: false, message: "Invalid repository or user id." });
+    }
+
     const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: "User not found." });
 
     if (!user.starRepos.includes(repoId)) {
       user.starRepos.push(repoId);
@@ -893,6 +968,7 @@ module.exports = {
   addPullRequestComment,
   getPullRequestDiff,
   reviewPullRequest,
+  getRepositoryChangeDiff,
   closePullRequest,
   mergePullRequest,
     getAllRepositories,

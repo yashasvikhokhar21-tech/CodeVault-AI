@@ -117,7 +117,14 @@ function PullRequestPanel({ repoId, currentBranch }) {
   useEffect(load, [repoId]);
   useEffect(() => setForm((current) => ({ ...current, sourceBranch: currentBranch })), [currentBranch]);
 
-  const create = async (event) => { event.preventDefault(); try { await api.post(`/repo/${repoId}/pulls`, form); setForm({ title: "", description: "", sourceBranch: currentBranch, targetBranch: "main" }); setError(""); await load(); } catch (err) { setError(err.response?.data?.error || "Could not create pull request."); } };
+  const create = async (event) => {
+    event.preventDefault();
+    if (form.sourceBranch === form.targetBranch) {
+      setError("Source and target branches must be different.");
+      return;
+    }
+    try { await api.post(`/repo/${repoId}/pulls`, form); setForm({ title: "", description: "", sourceBranch: currentBranch, targetBranch: "main" }); setError(""); await load(); } catch (err) { setError(err.response?.data?.error || "Could not create pull request."); }
+  };
   const open = async (pullRequest) => { try { setSelected((await api.get(`/repo/${repoId}/pulls/${pullRequest.id}`)).data); setDiff(null); setAiReview({ loading: false, error: "", data: null }); setError(""); } catch (err) { setError(err.response?.data?.error || "Could not load pull request."); } };
   const showDiff = async (file) => { try { setDiff((await api.get(`/repo/${repoId}/pulls/${selected.id}/diff`, { params: { path: file.path } })).data); } catch (err) { setError(err.response?.data?.error || "Could not load pull request diff."); } };
   const updateStatus = async (action) => { try { const response = await api({ method: action === "merge" ? "post" : "patch", url: `/repo/${repoId}/pulls/${selected.id}/${action}` }); setSelected(response.data); await load(); } catch (err) { setError(err.response?.data?.error || `Could not ${action} pull request.`); } };
@@ -349,12 +356,17 @@ function PullRequestPanel({ repoId, currentBranch }) {
           <form className="pull-request-create" onSubmit={create}>
             <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Pull request title" required />
             <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Description (optional)" />
-            <select value={form.targetBranch} onChange={(event) => setForm({ ...form, targetBranch: event.target.value })}>
-              {branches.map((branch) => <option key={branch.name}>{branch.name}</option>)}
-            </select>
-            <select value={form.sourceBranch} onChange={(event) => setForm({ ...form, sourceBranch: event.target.value })}>
-              {branches.map((branch) => <option key={branch.name}>{branch.name}</option>)}
-            </select>
+            <label>Source Branch
+              <select value={form.sourceBranch} aria-invalid={form.sourceBranch === form.targetBranch} aria-describedby={form.sourceBranch === form.targetBranch ? "pull-request-branch-error" : undefined} onChange={(event) => { setForm({ ...form, sourceBranch: event.target.value }); setError(""); }}>
+                {branches.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}</option>)}
+              </select>
+            </label>
+            <label>Target Branch
+              <select value={form.targetBranch} aria-invalid={form.sourceBranch === form.targetBranch} aria-describedby={form.sourceBranch === form.targetBranch ? "pull-request-branch-error" : undefined} onChange={(event) => { setForm({ ...form, targetBranch: event.target.value }); setError(""); }}>
+                {branches.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}</option>)}
+              </select>
+            </label>
+            {form.sourceBranch === form.targetBranch && <p id="pull-request-branch-error" className="repo-message error" role="alert">Source and target branches must be different.</p>}
             <button className="button button-primary" disabled={!form.title.trim() || form.sourceBranch === form.targetBranch}>New Pull Request</button>
           </form>
           <div className="pull-request-list">
@@ -390,12 +402,20 @@ const Repo = () => {
   const [importSizeError, setImportSizeError] = useState("");
   const importInputRef = useRef(null);
   const [importing, setImporting] = useState(false);
+
+  useEffect(() => {
+    if (!repoId && new URLSearchParams(window.location.search).get("import") === "1") {
+      setImportMode(true);
+    }
+  }, [repoId]);
   const [message, setMessage] = useState({ type: "", text: "" });
   const [downloading, setDownloading] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
   const [copiedCloneUrl, setCopiedCloneUrl] = useState(false);
-  const [ai, setAi] = useState({ loading: "", error: "", commitMessage: "", review: null });
+  const [ai, setAi] = useState({ loading: "", error: "", errorKind: "", commitMessage: "", review: null });
+  const aiRequestInProgress = useRef(false);
   const userId = localStorage.getItem("userId");
+  const isValidUserId = (value) => typeof value === "string" && /^[a-fA-F0-9]{24}$/.test(value);
 
   useEffect(() => {
     const load = async () => {
@@ -406,7 +426,8 @@ const Repo = () => {
         if (err.response?.status !== 404) setMessage({ type: "error", text: "Could not load your repositories." });
       }
     };
-    if (userId) load();
+    if (userId && isValidUserId(userId)) load();
+    else setRepositories([]);
   }, [userId]);
 
   useEffect(() => {
@@ -481,13 +502,19 @@ const Repo = () => {
     setTimeout(() => setCopiedCloneUrl(false), 1800);
   };
 
-  const runAi = async (kind) => {
-    setAi((current) => ({ ...current, loading: kind, error: "" }));
+  const runAi = async (requestedKind) => {
+    const kind = ai.error && ai.errorKind ? ai.errorKind : requestedKind;
+    if (aiRequestInProgress.current) return;
+    aiRequestInProgress.current = true;
+    const resultKey = kind === "commit" ? "commitMessage" : "review";
+    setAi((current) => ({ ...current, loading: kind, error: "", errorKind: "", [resultKey]: kind === "commit" ? "" : null }));
     try {
-      const response = await api.post(`/ai/repositories/${repoId}/${kind === "commit" ? "commit-message" : "review"}`);
-      setAi((current) => ({ ...current, loading: "", [kind === "commit" ? "commitMessage" : "review"]: kind === "commit" ? response.data.message : response.data }));
+      const response = await api.post(`/ai/repositories/${repoId}/${kind === "commit" ? "commit-message" : "review"}`, { branch: currentBranch });
+      setAi((current) => ({ ...current, loading: "", error: "", errorKind: "", [resultKey]: kind === "commit" ? response.data.message : response.data }));
     } catch (error) {
-      setAi((current) => ({ ...current, loading: "", error: error.response?.data?.error || "AI service is unavailable. Please try again later." }));
+      setAi((current) => ({ ...current, loading: "error", errorKind: kind, [resultKey]: kind === "commit" ? "" : null, error: error.response?.data?.error || "AI service is unavailable. Please try again later." }));
+    } finally {
+      aiRequestInProgress.current = false;
     }
   };
 
