@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import Navbar from "../Navbar";
 import "./issue.css";
 import {
+  AlertIcon,
   ArrowLeftIcon,
   CheckIcon,
   IssueOpenedIcon,
@@ -71,6 +72,7 @@ const Issue = () => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
+    if (error) setError("");
   };
 
   const handleSubmit = async (e) => {
@@ -91,8 +93,8 @@ const Issue = () => {
       setError("");
 
       await api.post(`/repo/${repoId}/issues`, {
-        title: form.title,
-        description: form.description,
+        title: form.title.trim(),
+        description: form.description.trim(),
         status: form.status,
       });
 
@@ -100,7 +102,7 @@ const Issue = () => {
       await loadIssues();
     } catch (err) {
       console.error("Failed to create issue:", err);
-      setError(err?.response?.data?.error || "Failed to create issue.");
+      setError(err?.response?.data?.error || (!err?.response ? "Network error. Unable to connect to server." : "Failed to create issue."));
     } finally {
       setLoading(false);
     }
@@ -196,7 +198,12 @@ const Issue = () => {
                 </select>
               </label>
 
-              {error && <div className="issue-message error">{error}</div>}
+              {error && (
+                <div className="issue-message error" role="alert">
+                  <AlertIcon size={16} className="error-icon" />
+                  <span>{error}</span>
+                </div>
+              )}
 
               <button type="submit" className="primary-btn" disabled={loading}>
                 <PlusIcon size={16} />

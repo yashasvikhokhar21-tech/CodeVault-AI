@@ -117,7 +117,53 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .empty-state h3 { margin: 2px 0 0; color: var(--cv-text); }
 .empty-state p { margin: 0 0 8px; }
-.error-state, .error { color: var(--cv-danger-text); }
+.error-state { color: var(--cv-danger-text); }
+
+/* Accessible error design for forms and banners: light red background, dark red text, subtle border */
+.repo-message, .profile-message, .auth-message, .issue-message {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  margin: 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.repo-message.error,
+.profile-message.error,
+.auth-message.error,
+.issue-message.error {
+  background-color: #FEF2F2 !important;
+  color: #B91C1C !important;
+  border: 1px solid #FECACA !important;
+  box-shadow: 0 1px 3px rgba(185, 28, 28, 0.08);
+}
+
+.repo-message.error .error-icon,
+.profile-message.error .error-icon,
+.auth-message.error .error-icon,
+.issue-message.error .error-icon {
+  flex-shrink: 0;
+  color: #DC2626 !important;
+}
+
+.repo-message.error span,
+.repo-message.error strong,
+.profile-message.error span,
+.auth-message.error span,
+.issue-message.error span {
+  color: #B91C1C !important;
+}
+
+.repo-message.success,
+.profile-message.success {
+  background: var(--cv-success-soft);
+  color: var(--cv-success-text);
+  border: 1px solid var(--cv-success-line);
+}
 .search-box { display: flex; align-items: center; gap: 9px; background: var(--cv-inset); border: 1px solid var(--cv-border); border-radius: var(--cv-radius-control); padding: 0 12px; color: var(--cv-muted); }
 .search-box input { width: 220px; border: 0; outline: 0; color: var(--cv-text); background: transparent; padding: 11px 0; }
 label { display: grid; gap: var(--cv-space-2); color: var(--cv-text-soft); font-size: 13px; font-weight: 600; }

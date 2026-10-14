@@ -1,0 +1,609 @@
+/* ==========================================================================
+   Antigravity Meet - Clean Attractive Solid Red Design System CSS
+   ========================================================================== */
+
+.landingPageContainer {
+  min-height: 100vh;
+  width: 100%;
+  background: var(--bg-dark);
+  color: var(--text-main);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow-x: hidden;
+  transition: background 0.25s ease, color 0.25s ease;
+}
+
+/* Glassmorphism Navbar */
+.landingPageContainer nav, .modernNavBar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  background: var(--nav-bg);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0.9rem 2.8rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.25s ease;
+}
+
+.brandLogo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.brandLogoIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #dc2626;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  transition: transform 0.25s ease;
+}
+
+.brandLogo:hover .brandLogoIcon {
+  transform: scale(1.05);
+}
+
+.brandLogoText {
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+}
+
+.brandLogoText span {
+  color: #dc2626;
+}
+
+[data-theme="dark"] .brandLogoText span, .dark-theme .brandLogoText span {
+  color: #f87171;
+}
+
+.navlist {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+}
+
+.navItem {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.navItem:hover {
+  color: var(--text-main);
+  background: rgba(220, 38, 38, 0.06);
+}
+
+.btnPrimaryGradient {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  padding: 0.6rem 1.4rem !important;
+  border-radius: 10px !important;
+  text-transform: none !important;
+  letter-spacing: 0.01em !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+  transition: all 0.2s ease !important;
+  border: none !important;
+}
+
+.btnPrimaryGradient:hover {
+  background: #b91c1c !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16) !important;
+  transform: translateY(-1px);
+}
+
+.btnSecondaryOutline {
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-main) !important;
+  font-weight: 600 !important;
+  padding: 0.6rem 1.4rem !important;
+  border-radius: 10px !important;
+  text-transform: none !important;
+  background: var(--bg-card) !important;
+  box-shadow: var(--shadow-sm) !important;
+  transition: all 0.2s ease !important;
+}
+
+.btnSecondaryOutline:hover {
+  border-color: #dc2626 !important;
+  color: #dc2626 !important;
+  background: rgba(220, 38, 38, 0.04) !important;
+}
+
+[data-theme="dark"] .btnSecondaryOutline:hover, .dark-theme .btnSecondaryOutline:hover {
+  border-color: #f87171 !important;
+  color: #f87171 !important;
+  background: rgba(248, 113, 113, 0.08) !important;
+}
+
+/* Landing Hero Section */
+.landingMainContainer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4rem 4.5rem 3rem 4.5rem;
+  max-width: 1320px;
+  margin: 0 auto;
+  width: 100%;
+  gap: 3.5rem;
+  z-index: 1;
+}
+
+.heroContent {
+  flex: 1.15;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  animation: fadeIn 0.5s ease-out;
+}
+
+.heroBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 1rem;
+  border-radius: 9999px;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.22);
+  color: #dc2626;
+  font-size: 0.88rem;
+  font-weight: 700;
+  width: fit-content;
+}
+
+[data-theme="dark"] .heroBadge, .dark-theme .heroBadge {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.heroBadgeDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #dc2626;
+}
+
+[data-theme="dark"] .heroBadgeDot, .dark-theme .heroBadgeDot {
+  background: #f87171;
+}
+
+.heroHeading {
+  font-size: 3.5rem;
+  font-weight: 800;
+  line-height: 1.14;
+  letter-spacing: -0.035em;
+  color: var(--text-main);
+}
+
+.heroHeadingGradient {
+  color: #dc2626;
+}
+
+[data-theme="dark"] .heroHeadingGradient, .dark-theme .heroHeadingGradient {
+  color: #f87171;
+}
+
+.heroSubtext {
+  font-size: 1.15rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+  max-width: 540px;
+}
+
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.1rem;
+  align-items: center;
+  margin-top: 0.4rem;
+}
+
+.heroJoinBox {
+  display: flex;
+  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 4px 6px 4px 14px;
+  gap: 8px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.heroJoinBox:focus-within {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15);
+}
+
+.heroJoinInput {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-main);
+  font-size: 0.95rem;
+  font-family: inherit;
+  width: 150px;
+}
+
+.heroJoinInput::placeholder {
+  color: var(--text-dim);
+}
+
+.heroGraphic {
+  flex: 0.85;
+  display: flex;
+  justify-content: center;
+  position: relative;
+}
+
+.heroGraphicCard {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 24px;
+  padding: 1.2rem;
+  box-shadow: var(--shadow-lg);
+  max-width: 460px;
+  width: 100%;
+}
+
+.heroGraphicCard img {
+  width: 100%;
+  height: auto;
+  border-radius: 16px;
+  display: block;
+  object-fit: cover;
+}
+
+.floatingTag {
+  position: absolute;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  padding: 0.6rem 1rem;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-main);
+  box-shadow: var(--shadow-md);
+}
+
+.floatingTagTop {
+  top: -12px;
+  right: -12px;
+}
+
+.floatingTagBottom {
+  bottom: -14px;
+  left: -14px;
+}
+
+/* Features Grid Section */
+.featuresSection {
+  max-width: 1240px;
+  margin: 3.5rem auto 5rem auto;
+  padding: 0 2rem;
+  width: 100%;
+  z-index: 1;
+}
+
+.featuresTitle {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-bottom: 2.5rem;
+  color: var(--text-main);
+}
+
+.featuresGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.6rem;
+}
+
+.featureCard {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 16px;
+  padding: 1.8rem;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.25s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.featureCard:hover {
+  transform: translateY(-4px);
+  border-color: #cbd5e1;
+  box-shadow: var(--shadow-md);
+}
+
+.featureIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: rgba(220, 38, 38, 0.08);
+  color: #dc2626;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+[data-theme="dark"] .featureIcon, .dark-theme .featureIcon {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+.featureCard h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.featureCard p {
+  font-size: 0.92rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+/* ==========================================================================
+   Dashboard / Home Page Styling
+   ========================================================================== */
+
+.dashboardContainer {
+  min-height: 100vh;
+  background: var(--bg-dark);
+  color: var(--text-main);
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboardMain {
+  max-width: 1240px;
+  margin: 2.5rem auto;
+  padding: 0 2rem;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+
+.dashboardHeroCard {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 2.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 2rem;
+  box-shadow: var(--shadow-md);
+}
+
+.dashboardHeroContent {
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.dashboardHeroContent h2 {
+  font-size: 2.1rem;
+  font-weight: 800;
+  line-height: 1.22;
+  letter-spacing: -0.025em;
+  color: var(--text-main);
+}
+
+.dashboardHeroContent p {
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
+.quickActionsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 1.8rem;
+}
+
+.actionCard {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 18px;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.25s ease;
+}
+
+.actionCard:hover {
+  border-color: #cbd5e1;
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.actionCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.actionIcon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+}
+
+.actionIconMaroon, .actionIconRed {
+  background: rgba(220, 38, 38, 0.08);
+  color: #dc2626;
+}
+
+[data-theme="dark"] .actionIconMaroon, [data-theme="dark"] .actionIconRed, .dark-theme .actionIconMaroon, .dark-theme .actionIconRed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+.actionIconRose {
+  background: rgba(225, 29, 72, 0.08);
+  color: #e11d48;
+}
+
+[data-theme="dark"] .actionIconRose, .dark-theme .actionIconRose {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+}
+
+.actionIconSlate {
+  background: rgba(71, 85, 105, 0.08);
+  color: #475569;
+}
+
+[data-theme="dark"] .actionIconSlate, .dark-theme .actionIconSlate {
+  background: rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
+}
+
+/* ==========================================================================
+   History Page Styling
+   ========================================================================== */
+
+.historyContainer {
+  min-height: 100vh;
+  background: var(--bg-dark);
+  color: var(--text-main);
+  display: flex;
+  flex-direction: column;
+}
+
+.historyContent {
+  max-width: 920px;
+  margin: 2.5rem auto;
+  padding: 0 1.5rem;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.historyHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.2rem;
+}
+
+.historyCard {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border-card) !important;
+  border-radius: 14px !important;
+  padding: 1.25rem !important;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: var(--shadow-sm) !important;
+  transition: all 0.2s ease !important;
+  color: var(--text-main) !important;
+}
+
+.historyCard:hover {
+  border-color: #cbd5e1 !important;
+  transform: translateX(4px);
+  box-shadow: var(--shadow-md) !important;
+}
+
+.meetingCodeBadge {
+  font-family: 'Fira Code', monospace;
+  font-weight: 700;
+  font-size: 1.02rem;
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.08);
+  padding: 0.25rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid rgba(220, 38, 38, 0.2);
+}
+
+[data-theme="dark"] .meetingCodeBadge, .dark-theme .meetingCodeBadge {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.emptyState {
+  text-align: center;
+  padding: 4.5rem 2rem;
+  background: var(--bg-card);
+  border: 1px dashed var(--border-color);
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* ==========================================================================
+   Responsive Breakpoints
+   ========================================================================== */
+
+@media (max-width: 900px) {
+  .landingMainContainer {
+    flex-direction: column;
+    padding: 2rem 1.5rem;
+    text-align: center;
+  }
+
+  .heroHeading {
+    font-size: 2.5rem;
+  }
+
+  .heroSubtext {
+    margin: 0 auto;
+  }
+
+  .heroActions {
+    justify-content: center;
+  }
+
+  .heroBadge {
+    margin: 0 auto;
+  }
+
+  .dashboardHeroCard {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .landingPageContainer nav, .modernNavBar {
+    padding: 1rem 1.25rem;
+  }
+}

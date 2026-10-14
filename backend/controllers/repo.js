@@ -14,6 +14,9 @@ const { reviewPullRequestDiff, redactSecrets, AIError } = require("../services/a
 const execFileAsync = promisify(execFile);
 
 const commandEntry = path.resolve(__dirname, "../index.js");
+function getRemoteRepoDir() {
+  return path.resolve(__dirname, "../remoteRepo");
+}
 const MAX_IMPORT_FILES = 10000;
 const MAX_IMPORT_TOTAL_BYTES = 250 * 1024 * 1024;
 const isValidObjectId = (value) => typeof value === "string" && mongoose.Types.ObjectId.isValid(value);
@@ -96,7 +99,7 @@ async function importRepository(req, res) {
     const commitIds = await fs.readdir(path.join(importRoot, ".hiddenGit", "commits"));
     const commitId = commitIds[0];
     pushedCommitId = commitId;
-    const remoteCommitRoot = path.resolve(process.cwd(), "remoteRepo", commitId);
+    const remoteCommitRoot = path.resolve(getRemoteRepoDir(), commitId);
     for (const relativePath of importedPaths) {
       const source = path.join(importRoot, ...relativePath.split("/"));
       const destination = path.join(remoteCommitRoot, ...relativePath.split("/"));
@@ -112,7 +115,7 @@ async function importRepository(req, res) {
     return res.status(201).json({ message: "Project imported!", repositoryID: repository._id });
   } catch (err) {
     console.error("Error importing repository:", err.message);
-    if (pushedCommitId) await fs.rm(path.resolve(process.cwd(), "remoteRepo", pushedCommitId), { recursive: true, force: true });
+    if (pushedCommitId) await fs.rm(path.resolve(getRemoteRepoDir(), pushedCommitId), { recursive: true, force: true });
     return res.status(400).json({ error: err.message || "Could not import project." });
   } finally {
     await fs.rm(importRoot, { recursive: true, force: true });
@@ -134,7 +137,7 @@ async function fetchRepositoryFiles(req, res) {
       });
     }
     if (req.query.branch) return res.json({ files: [], commits: [] });
-    const remotePath = path.resolve(process.cwd(), "remoteRepo");
+    const remotePath = getRemoteRepoDir();
     const commits = (await fs.readdir(remotePath, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory())
       .sort((left, right) => right.name.localeCompare(left.name));
@@ -170,7 +173,7 @@ async function downloadRepository(req, res) {
     if (!repository.visibility && String(repository.owner) !== req.user.id) return res.status(403).json({ error: "You are not authorized to download this repository." });
     if (!repository.initialCommit || !repository.content?.length) return res.status(404).json({ error: "This repository has no downloadable files." });
 
-    const commitRoot = path.resolve(process.cwd(), "remoteRepo", repository.initialCommit);
+    const commitRoot = path.resolve(getRemoteRepoDir(), repository.initialCommit);
     const files = [];
     for (const relativePath of repository.content) {
       if (getImportExclusion(relativePath)) continue;
@@ -225,15 +228,20 @@ async function readSnapshot(snapshotRoot) {
 }
 
 async function allRepositorySnapshots(repository) {
-  const remotePath = path.resolve(process.cwd(), "remoteRepo");
+  const remotePath = getRemoteRepoDir();
   const entries = await fs.readdir(remotePath, { withFileTypes: true }).catch(() => []);
   const snapshots = [];
+  const branchCommits = new Set(
+    (repository.branches || []).flatMap((b) => b.commits || (b.head ? [b.head] : []))
+  );
   for (const entry of entries.filter((item) => item.isDirectory())) {
     if (!validCommitId(entry.name)) continue;
     const root = path.join(remotePath, entry.name);
     const info = await fs.readFile(path.join(root, "commit.json"), "utf8").then(JSON.parse).catch(() => null);
     const files = await readSnapshot(root).catch(() => new Map());
-    const related = entry.name === repository.initialCommit || [...files.keys()].some((filePath) => repository.content?.includes(filePath));
+    const related = branchCommits.size > 0 || repository.initialCommit
+      ? (entry.name === repository.initialCommit || branchCommits.has(entry.name))
+      : [...files.keys()].some((filePath) => repository.content?.includes(filePath));
     if (related && info) snapshots.push({ id: entry.name, root, files, message: info.message, date: info.date });
   }
   return snapshots.sort((left, right) => new Date(left.date) - new Date(right.date));
@@ -254,8 +262,16 @@ async function repositorySnapshots(repository, branchName) {
   const branches = await ensureBranches(repository);
   const branch = branches.find((item) => item.name === branchName);
   if (!branch) return [];
-  const commits = new Set(branch.commits || (branch.head ? [branch.head] : []));
-  return snapshots.filter((snapshot) => commits.has(snapshot.id));
+  const branchCommitsList = branch.commits || (branch.head ? [branch.head] : []);
+  const commitsSet = new Set(branchCommitsList);
+  const filtered = snapshots.filter((snapshot) => commitsSet.has(snapshot.id));
+  const orderMap = new Map(branchCommitsList.map((id, idx) => [id, idx]));
+  return filtered.sort((a, b) => {
+    const idxA = orderMap.has(a.id) ? orderMap.get(a.id) : -1;
+    const idxB = orderMap.has(b.id) ? orderMap.get(b.id) : -1;
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    return new Date(a.date) - new Date(b.date);
+  });
 }
 
 function snapshotDiff(parent, current) {
@@ -520,14 +536,137 @@ function isSensitivePath(filePath) {
 
 const MAX_PR_DIFF_CHARS = 24000;
 
-async function getRepositoryChangeDiff(repository, branchName) {
-  const snapshots = await repositorySnapshots(repository, branchName);
-  if (!snapshots.length) throw new AIError("No committed changes were found on this branch to review.", 400);
+async function resolveBranchComparison(repository, branchName = "main", targetCommitId = null) {
+  const branches = await ensureBranches(repository);
+  const branch = branches.find((item) => item.name === branchName);
+  if (!branch) {
+    return {
+      hasChanges: false,
+      comparison: `Branch '${branchName}' not found`,
+      reason: `Branch '${branchName}' does not exist in this repository.`,
+      branch: branchName,
+      changedFiles: [],
+      diff: "",
+      totalFilesChanged: 0,
+      latestCommitWithChanges: null,
+    };
+  }
 
-  const currentSnapshot = snapshots.at(-1);
-  const previousFiles = snapshots.at(-2)?.files || new Map();
+  const snapshots = await repositorySnapshots(repository, branchName);
+  if (!snapshots.length) {
+    return {
+      hasChanges: false,
+      comparison: `Empty branch '${branchName}'`,
+      reason: `No committed snapshots exist on branch '${branchName}'.`,
+      branch: branchName,
+      changedFiles: [],
+      diff: "",
+      totalFilesChanged: 0,
+      latestCommitWithChanges: null,
+    };
+  }
+
+  let commitIndex = -1;
+  if (targetCommitId && validCommitId(targetCommitId)) {
+    commitIndex = snapshots.findIndex((s) => s.id === targetCommitId);
+  }
+  if (commitIndex === -1) {
+    commitIndex = snapshots.length - 1;
+  }
+
+  const currentSnapshot = snapshots[commitIndex];
+  let previousFiles = new Map();
+  let baseSnapshot = null;
+  let comparisonDescription = "";
+  let isInitial = false;
+
+  const mainBranch = branches.find((b) => b.name === "main");
+  const branchCommits = branch.commits || (branch.head ? [branch.head] : []);
+  const mainCommits = mainBranch?.commits || (mainBranch?.head ? [mainBranch.head] : []);
+
+  if (branchName !== "main" && mainBranch && !targetCommitId) {
+    const commonId = [...branchCommits].reverse().find((id) => mainCommits.includes(id));
+    if (commonId && commonId !== currentSnapshot.id) {
+      const allSnaps = await allRepositorySnapshots(repository);
+      baseSnapshot = allSnaps.find((s) => s.id === commonId) || null;
+      if (baseSnapshot) {
+        previousFiles = baseSnapshot.files;
+        comparisonDescription = `Branch '${branchName}' (${currentSnapshot.id.slice(0, 8)}) compared to 'main' base (${commonId.slice(0, 8)})`;
+      }
+    }
+  }
+
+  if (!comparisonDescription) {
+    if (commitIndex === 0) {
+      isInitial = true;
+      previousFiles = new Map();
+      comparisonDescription = `Initial commit ${currentSnapshot.id.slice(0, 8)} ("${currentSnapshot.message}") compared to empty repository`;
+    } else {
+      baseSnapshot = snapshots[commitIndex - 1];
+      previousFiles = baseSnapshot.files;
+      comparisonDescription = `Commit ${currentSnapshot.id.slice(0, 8)} ("${currentSnapshot.message}") compared to parent ${baseSnapshot.id.slice(0, 8)} ("${baseSnapshot.message}")`;
+    }
+  }
+
   const changedFiles = snapshotDiff(previousFiles, currentSnapshot.files);
-  if (!changedFiles.length) throw new AIError("No changed files were found on this branch to review.", 400);
+
+  if (!changedFiles.length) {
+    let latestCommitWithChanges = null;
+    for (let i = snapshots.length - 1; i >= 1; i--) {
+      const c = snapshots[i];
+      const p = snapshots[i - 1];
+      const diff = snapshotDiff(p.files, c.files);
+      if (diff.length > 0) {
+        latestCommitWithChanges = {
+          id: c.id,
+          message: c.message,
+          date: c.date,
+          parentCommitId: p.id,
+          parentMessage: p.message,
+          changedCount: diff.length,
+          files: diff,
+        };
+        break;
+      }
+    }
+    if (!latestCommitWithChanges && snapshots.length > 0) {
+      const initial = snapshots[0];
+      const diff = snapshotDiff(new Map(), initial.files);
+      if (diff.length > 0) {
+        latestCommitWithChanges = {
+          id: initial.id,
+          message: initial.message,
+          date: initial.date,
+          parentCommitId: null,
+          parentMessage: "Initial empty tree",
+          changedCount: diff.length,
+          files: diff,
+        };
+      }
+    }
+
+    let reason = "";
+    if (isInitial) {
+      reason = `Initial commit ${currentSnapshot.id.slice(0, 8)} contains no files.`;
+    } else if (baseSnapshot) {
+      reason = `Commit ${currentSnapshot.id.slice(0, 8)} ("${currentSnapshot.message}") has identical files to parent commit ${baseSnapshot.id.slice(0, 8)} ("${baseSnapshot.message}"). No files were added, modified, or deleted.`;
+    } else {
+      reason = `No changed files were found on branch '${branchName}' to review.`;
+    }
+
+    return {
+      hasChanges: false,
+      comparison: comparisonDescription,
+      reason,
+      branch: branchName,
+      currentCommit: { id: currentSnapshot.id, message: currentSnapshot.message, date: currentSnapshot.date },
+      parentCommit: baseSnapshot ? { id: baseSnapshot.id, message: baseSnapshot.message, date: baseSnapshot.date } : null,
+      changedFiles: [],
+      diff: "",
+      totalFilesChanged: 0,
+      latestCommitWithChanges,
+    };
+  }
 
   const chunks = changedFiles.map((file) => {
     if (isSensitivePath(file.path)) {
@@ -560,10 +699,56 @@ async function getRepositoryChangeDiff(repository, branchName) {
   });
 
   const diff = redactSecrets(chunks.join("\n\n"));
-  if (diff.length > MAX_PR_DIFF_CHARS) {
+
+  return {
+    hasChanges: true,
+    comparison: comparisonDescription,
+    branch: branchName,
+    currentCommit: { id: currentSnapshot.id, message: currentSnapshot.message, date: currentSnapshot.date },
+    parentCommit: baseSnapshot ? { id: baseSnapshot.id, message: baseSnapshot.message, date: baseSnapshot.date } : null,
+    changedFiles,
+    diff,
+    totalFilesChanged: changedFiles.length,
+    latestCommitWithChanges: null,
+  };
+}
+
+async function getRepositoryChangeDiff(repository, branchName = "main", targetCommitId = null) {
+  const result = await resolveBranchComparison(repository, branchName, targetCommitId);
+  if (!result.hasChanges) {
+    throw new AIError(result.reason || "No changed files were found on this branch to review.", 400);
+  }
+  if (result.diff.length > MAX_PR_DIFF_CHARS) {
     throw new AIError("The repository changes are too large for AI review. Please review a smaller commit.", 400);
   }
-  return diff;
+  return result.diff;
+}
+
+async function getBranchChanges(req, res) {
+  try {
+    const { id } = req.params;
+    const branchName = req.query.branch || "main";
+    const commitId = req.query.commit || null;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ error: "Repository not found." });
+    }
+
+    const repository = await Repository.findById(id);
+    if (!repository) {
+      return res.status(404).json({ error: "Repository not found." });
+    }
+
+    if (!await repositoryAccess(req, repository)) {
+      return res.status(403).json({ error: "You are not authorized to view this repository." });
+    }
+
+    const comparison = await resolveBranchComparison(repository, branchName, commitId);
+    return res.json(comparison);
+  } catch (err) {
+    console.error("Error during getBranchChanges:", err.message);
+    return res.status(500).json({ error: "Could not load branch changes." });
+  }
 }
 
 async function reviewPullRequest(req, res) {
@@ -681,7 +866,7 @@ async function mergePullRequest(req, res) {
       if (!bufferEqual(baseFile, sourceFile)) { if (sourceFile) merged.set(filePath, sourceFile); else merged.delete(filePath); }
     }
     const mergeCommit = uuidv4();
-    const mergeRoot = path.resolve(process.cwd(), "remoteRepo", mergeCommit);
+    const mergeRoot = path.resolve(getRemoteRepoDir(), mergeCommit);
     for (const [relativePath, content] of merged) { const target = path.join(mergeRoot, ...relativePath.split("/")); await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, content); }
     await fs.writeFile(path.join(mergeRoot, "commit.json"), JSON.stringify({ message: `Merge #${pullRequest.number}: ${pullRequest.title}`, date: new Date().toISOString() }));
     const targetBranch = context.target;
@@ -951,8 +1136,125 @@ async function starRepository(req, res) {
   }
 }
 
+async function pushRepositoryCommits(req, res) {
+  try {
+    const { id } = req.params;
+    const { branch = "main", commits = [] } = req.body || {};
+
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ error: "Repository not found." });
+    }
+
+    const repository = await Repository.findById(id);
+    if (!repository) {
+      return res.status(404).json({ error: "Repository not found." });
+    }
+
+    const ownerId = String(repository.owner?._id || repository.owner);
+    if (ownerId !== String(req.user.id)) {
+      return res.status(403).json({
+        error: `Only the repository owner can push commits. Repository '${repository.name}' is owned by user ID ${ownerId}, but your active session is user ID ${req.user.id}. Please log in as the repository owner.`,
+      });
+    }
+
+    if (!validBranchName(branch)) {
+      return res.status(400).json({ error: "Invalid branch name." });
+    }
+
+    if (!Array.isArray(commits) || !commits.length) {
+      return res.status(400).json({ error: "No commits provided to push." });
+    }
+
+    const remoteRepoDir = path.resolve(__dirname, "../remoteRepo");
+    await fs.mkdir(remoteRepoDir, { recursive: true });
+
+    const pushedCommitIds = [];
+    const allPushedPaths = new Set(repository.content || []);
+
+    const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB per file
+
+    for (const commit of commits) {
+      const commitId = commit.id || uuidv4();
+      if (!validCommitId(commitId)) {
+        return res.status(400).json({ error: `Invalid commit ID: ${commitId}` });
+      }
+
+      const commitDir = path.join(remoteRepoDir, commitId);
+      await fs.mkdir(commitDir, { recursive: true });
+
+      const commitInfo = {
+        message: typeof commit.message === "string" ? commit.message.trim() : "Commit",
+        date: commit.date || new Date().toISOString(),
+      };
+      await fs.writeFile(path.join(commitDir, "commit.json"), JSON.stringify(commitInfo));
+
+      if (Array.isArray(commit.files)) {
+        for (const file of commit.files) {
+          if (!file || !file.path) continue;
+          const relativePath = String(file.path).replace(/\\/g, "/");
+          if (getImportExclusion(relativePath)) continue;
+          if (relativePath.startsWith("/") || relativePath.split("/").some((p) => !p || p === "." || p === "..")) continue;
+
+          const targetFile = path.resolve(commitDir, ...relativePath.split("/"));
+          if (!targetFile.startsWith(`${commitDir}${path.sep}`)) continue;
+
+          const content = typeof file.content === "string" ? Buffer.from(file.content, "utf8") : Buffer.from(file.content || "");
+          if (content.length > MAX_FILE_BYTES) {
+            // Clean up partially written commit dir
+            await fs.rm(commitDir, { recursive: true, force: true }).catch(() => {});
+            return res.status(400).json({ error: `File '${relativePath}' exceeds the maximum allowed 10MB limit (${(content.length / (1024 * 1024)).toFixed(2)}MB).` });
+          }
+
+          await fs.mkdir(path.dirname(targetFile), { recursive: true });
+          await fs.writeFile(targetFile, content);
+          allPushedPaths.add(relativePath);
+        }
+      }
+
+      pushedCommitIds.push(commitId);
+    }
+
+    await ensureBranches(repository);
+    const resolvedHead = req.body.head || pushedCommitIds[pushedCommitIds.length - 1];
+    let targetBranch = repository.branches.find((b) => b.name === branch);
+    if (!targetBranch) {
+      targetBranch = {
+        name: branch,
+        head: resolvedHead,
+        commits: pushedCommitIds,
+      };
+      repository.branches.push(targetBranch);
+    } else {
+      const existingCommits = new Set(targetBranch.commits || []);
+      for (const cid of pushedCommitIds) {
+        existingCommits.add(cid);
+      }
+      targetBranch.commits = Array.from(existingCommits);
+      targetBranch.head = resolvedHead;
+    }
+
+    if (!repository.initialCommit && pushedCommitIds.length) {
+      repository.initialCommit = pushedCommitIds[0];
+    }
+
+    repository.content = Array.from(allPushedPaths);
+    await repository.save();
+
+    res.json({
+      message: "Push successful!",
+      branch,
+      head: targetBranch.head,
+      commitsPushed: pushedCommitIds.length,
+    });
+  } catch (err) {
+    console.error("Error during pushRepositoryCommits:", err.message);
+    res.status(500).json({ error: "Could not push commits." });
+  }
+}
+
 module.exports = {
-    createRepository,
+  pushRepositoryCommits,
+  createRepository,
   importRepository,
   fetchRepositoryFiles,
   downloadRepository,
@@ -968,7 +1270,9 @@ module.exports = {
   addPullRequestComment,
   getPullRequestDiff,
   reviewPullRequest,
+  resolveBranchComparison,
   getRepositoryChangeDiff,
+  getBranchChanges,
   closePullRequest,
   mergePullRequest,
     getAllRepositories,

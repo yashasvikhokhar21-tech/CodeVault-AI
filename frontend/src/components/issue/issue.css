@@ -129,15 +129,26 @@
 
 .issue-message {
   margin-top: 10px;
-  padding: 10px 12px;
+  padding: 10px 14px;
   border-radius: 8px;
-  font-size: 0.92rem;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .issue-message.error {
-  background: var(--cv-danger-soft);
-  border: 1px solid var(--cv-danger-line);
-  color: var(--cv-danger-text);
+  background-color: #FEF2F2;
+  color: #B91C1C;
+  border: 1px solid #FECACA;
+  box-shadow: 0 1px 3px rgba(185, 28, 28, 0.08);
+}
+
+.issue-message.error .error-icon {
+  flex-shrink: 0;
+  color: #DC2626;
 }
 
 .primary-btn,

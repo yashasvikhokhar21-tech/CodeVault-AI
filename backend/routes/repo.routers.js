@@ -45,10 +45,7 @@ repoRouter.post("/repo/import", requireAuth, importUpload.array("files", MAX_IMP
 repoRouter.get("/repo/all", repoController.getAllRepositories);
 repoRouter.get("/repo/commits", async (req, res) => {
   try {
-    const remotePath = path.resolve(
-      process.cwd(),
-      "remoteRepo"
-    );
+    const remotePath = path.resolve(__dirname, "../remoteRepo");
 
     const commits = await fs.readdir(remotePath);
 
@@ -64,10 +61,12 @@ repoRouter.get("/repo/commits", async (req, res) => {
 
 repoRouter.get("/repo/:id", repoController.fetchRepositoryById);
 repoRouter.get("/repo/:id/files", repoController.fetchRepositoryFiles);
+repoRouter.get("/repo/:id/changes", requireAuth, repoController.getBranchChanges);
 repoRouter.get("/repo/:id/download", requireAuth, repoController.downloadRepository);
 repoRouter.get("/repo/:id/commits", requireAuth, repoController.listRepositoryCommits);
 repoRouter.get("/repo/:id/commits/:commitId", requireAuth, repoController.getRepositoryCommit);
 repoRouter.get("/repo/:id/commits/:commitId/diff", requireAuth, repoController.getRepositoryDiff);
+repoRouter.post("/repo/:id/push", requireAuth, repoController.pushRepositoryCommits);
 repoRouter.get("/repo/:id/branches", requireAuth, repoController.listBranches);
 repoRouter.post("/repo/:id/branches/:branchName", requireAuth, repoController.createBranch);
 repoRouter.delete("/repo/:id/branches/:branchName", requireAuth, repoController.deleteBranch);

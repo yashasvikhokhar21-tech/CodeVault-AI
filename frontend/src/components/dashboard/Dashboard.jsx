@@ -17,33 +17,60 @@ const Dashboard = () => {
   const [question, setQuestion] = useState("");
   const [assistant, setAssistant] = useState({ loading: false, error: "", messages: [] });
   const assistantPending = useRef(false);
-  const userId = currentUser;
+  const userId = currentUser || localStorage.getItem("userId");
   const isValidUserId = (value) => typeof value === "string" && /^[a-fA-F0-9]{24}$/.test(value);
 
   useEffect(() => {
+    let isMounted = true;
     const load = async () => {
-      const [repoResult, userResult] = await Promise.allSettled([
-        api.get(`/repo/user/${userId}`),
-        api.get(`/userprofile/${userId}`),
-      ]);
+      setLoading(true);
+      setError("");
+      try {
+        const [repoResult, userResult] = await Promise.allSettled([
+          api.get(`/repo/user/${userId}`),
+          api.get(`/userprofile/${userId}`),
+        ]);
 
-      if (repoResult.status === "fulfilled") {
-        setRepositories(repoResult.value.data?.repositories || []);
-      } else {
-        if (repoResult.reason.response?.status !== 404) setError("We could not load your workspace.");
-        setRepositories([]);
+        if (!isMounted) return;
+
+        if (repoResult.status === "fulfilled") {
+          setRepositories(repoResult.value.data?.repositories || []);
+        } else {
+          if (repoResult.reason.response?.status !== 404) {
+            setError(
+              repoResult.reason.response?.data?.message ||
+              repoResult.reason.response?.data?.error ||
+              (!repoResult.reason.response ? "Network error. Unable to load workspace." : "We could not load your workspace.")
+            );
+          }
+          setRepositories([]);
+        }
+
+        if (userResult.status === "fulfilled") {
+          setUsername(userResult.value.data?.username || "there");
+        } else if (repoResult.status !== "fulfilled" && repoResult.reason.response?.status !== 404) {
+          setError(
+            userResult.reason.response?.data?.message ||
+            userResult.reason.response?.data?.error ||
+            (!userResult.reason.response ? "Network error. Unable to load profile." : "We could not load your profile.")
+          );
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        setError("Unable to load dashboard data. Please try again.");
+      } finally {
+        if (isMounted) setLoading(false);
       }
-
-      if (userResult.status === "fulfilled") {
-        setUsername(userResult.value.data?.username || "there");
-      } else {
-        setError("We could not load your profile.");
-      }
-
-      setLoading(false);
     };
-    if (userId && isValidUserId(userId)) load();
-    else setLoading(false);
+    if (userId && isValidUserId(userId)) {
+      load();
+    } else {
+      setLoading(false);
+    }
+
+    return () => {
+      isMounted = false;
+    };
   }, [userId]);
 
   const askAssistant = async (event) => {

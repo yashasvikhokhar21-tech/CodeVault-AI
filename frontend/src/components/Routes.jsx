@@ -2,7 +2,7 @@
 
 
 import { useEffect } from "react";
-import { useNavigate, useRoutes } from "react-router-dom";
+import { useLocation, useNavigate, useRoutes } from "react-router-dom";
 
 import Dashboard from "./dashboard/Dashboard";
 import Profile from "./user/Profile";
@@ -16,6 +16,7 @@ import { useAuth } from "../useAuth";
 const ProjectRoutes = () => {
   const { currentUser, setCurrentUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     const userIdFromStorage = localStorage.getItem("userId");
@@ -26,15 +27,15 @@ const ProjectRoutes = () => {
 
     if (
       !userIdFromStorage &&
-      !["/auth", "/signup"].includes(window.location.pathname)
+      !["/auth", "/signup"].includes(location.pathname)
     ) {
       navigate("/auth");
     }
 
-    if (userIdFromStorage && ["/auth", "/signup"].includes(window.location.pathname)) {
+    if (userIdFromStorage && ["/auth", "/signup"].includes(location.pathname)) {
       navigate("/");
     }
-  }, [currentUser, navigate, setCurrentUser]);
+  }, [currentUser, location.pathname, navigate, setCurrentUser]);
 
   const element = useRoutes([
     {

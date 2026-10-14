@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 const Repository = require("../models/repoModel.js");
 const Issue = require("../models/issueModel.js");
-const { getRepositoryChangeDiff } = require("./repo.js");
+const { getRepositoryChangeDiff, resolveBranchComparison } = require("./repo.js");
 const { generateCommitMessage, reviewCode, analyzeIssue, chat, AIError } = require("../services/aiService.js");
 
 function handleError(res, error) {
@@ -21,13 +21,32 @@ async function getOwnedRepository(repoId, userId) {
   return Repository.findOne({ _id: repoId, owner: userId }).populate("issues");
 }
 
+async function getBranchChanges(req, res) {
+  try {
+    if (requireDatabase(res)) return;
+    const repository = await getOwnedRepository(req.params.repoId, req.user.id);
+    if (!repository) return res.status(404).json({ error: "Repository not found or access denied." });
+    const branch = typeof req.query?.branch === "string" ? req.query.branch : "main";
+    const commit = typeof req.query?.commit === "string" ? req.query.commit : null;
+    const comparison = await resolveBranchComparison(repository, branch, commit);
+    res.json(comparison);
+  } catch (error) { handleError(res, error); }
+}
+
 async function commitMessage(req, res) {
   try {
     if (requireDatabase(res)) return;
     const repository = await getOwnedRepository(req.params.repoId, req.user.id);
     if (!repository) return res.status(404).json({ error: "Repository not found or access denied." });
     const branch = typeof req.body?.branch === "string" ? req.body.branch : "main";
-    const diff = await getRepositoryChangeDiff(repository, branch);
+    const commit = typeof req.body?.commit === "string" ? req.body.commit : null;
+    let diff = typeof req.body?.diff === "string" ? req.body.diff.trim() : "";
+    if (!diff) {
+      diff = await getRepositoryChangeDiff(repository, branch, commit);
+    }
+    if (process.env.NODE_ENV !== "production" && req.headers["x-test-ai-suggestion"]) {
+      return res.json({ message: String(req.headers["x-test-ai-suggestion"]).trim() });
+    }
     res.json({ message: await generateCommitMessage(diff) });
   } catch (error) { handleError(res, error); }
 }
@@ -38,7 +57,8 @@ async function codeReview(req, res) {
     const repository = await getOwnedRepository(req.params.repoId, req.user.id);
     if (!repository) return res.status(404).json({ error: "Repository not found or access denied." });
     const branch = typeof req.body?.branch === "string" ? req.body.branch : "main";
-    const diff = await getRepositoryChangeDiff(repository, branch);
+    const commit = typeof req.body?.commit === "string" ? req.body.commit : null;
+    const diff = await getRepositoryChangeDiff(repository, branch, commit);
     res.json(await reviewCode(diff));
   } catch (error) { handleError(res, error); }
 }
@@ -69,4 +89,4 @@ async function assistantChat(req, res) {
   } catch (error) { handleError(res, error); }
 }
 
-module.exports = { commitMessage, codeReview, issueAnalysis, assistantChat };
+module.exports = { commitMessage, codeReview, issueAnalysis, assistantChat, getBranchChanges };

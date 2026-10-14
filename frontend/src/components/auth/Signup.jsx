@@ -2,6 +2,7 @@ import { useState } from "react";
 import api from "../../api";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../useAuth";
+import { AlertIcon } from "@primer/octicons-react";
 import "./auth.css";
 
 const Signup = () => {
@@ -37,7 +38,7 @@ const Signup = () => {
 
       window.location.href = "/";
     } catch (err) {
-      setError(err?.response?.data?.message || "Could not create your account.");
+      setError(err?.response?.data?.message || (!err?.response ? "Network error. Unable to connect to server." : "Could not create your account."));
     } finally {
       setLoading(false);
     }
@@ -58,7 +59,10 @@ const Signup = () => {
             type="text"
             placeholder="Enter username"
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              if (error) setError("");
+            }}
           />
 
           <label>Email address</label>
@@ -67,7 +71,10 @@ const Signup = () => {
             type="email"
             placeholder="Enter email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (error) setError("");
+            }}
           />
 
           <label>Password</label>
@@ -76,10 +83,18 @@ const Signup = () => {
             type="password"
             placeholder="Create password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (error) setError("");
+            }}
           />
 
-          {error && <div className="auth-message error">{error}</div>}
+          {error && (
+            <div className="auth-message error" role="alert">
+              <AlertIcon size={16} className="error-icon" />
+              <span>{error}</span>
+            </div>
+          )}
 
           <button
             type="submit"

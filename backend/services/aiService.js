@@ -199,6 +199,10 @@ async function askGemini(prompt, { json = false, responseSchema, client = null, 
     throw new AIError("Gemini API key is missing. Add GEMINI_API_KEY to the backend environment.", 503);
   }
 
+  if (process.env.CODEVAULT_AI_MOCK_RESPONSE) {
+    return process.env.CODEVAULT_AI_MOCK_RESPONSE;
+  }
+
   let ai = client;
   try {
     if (!ai) ai = new GoogleGenAI({ apiKey: geminiApiKey });

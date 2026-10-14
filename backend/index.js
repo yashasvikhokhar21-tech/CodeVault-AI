@@ -18,51 +18,13 @@ const { pushRepo } = require('./controllers/push');
 const { pullrepo } = require('./controllers/pull');
 const { revertRepo } = require('./controllers/revert');
 const mainrouter = require('./routes/main.routers');
-const argv = yargs(hideBin(process.argv))
-    .command('start', 'Start the application', {}, startApp)
-    .command('init', 'Initialize a new repository', {}, initRepo)
-    .command('add <filename>', 'Add file contents', (yargs) => {
-        yargs.positional('filename', {
-            describe: 'file adding to the staging area',
-            type: 'string'
-        });
-    }, (argv) => {
-        addRepo(argv.filename);
-    })
-    .command('commits <message>', 'Commit staged changes', (yargs) => {
-        yargs.positional('message', {
-            describe: 'commit message',
-            type: 'string'
-        });
-    }, (argv) => {
-        commitRepo(argv.message);
-    })
-    .command('push', 'Push changes to remote repository', {}, pushRepo)
-    .command(
-        'push',
-        'Push commits to remote repository',
-        () => {},
-        () => {
-            pushRepo();
-        }
-    )
-    .command('pull', 'Pull latest changes from remote repository', {}, pullrepo)
-    .command('revert <commitId>', 'Revert a commit', (yargs) => {
-        yargs.positional('commitId', {
-            describe: 'commit id to revert',
-            type: 'string'
-        });
-    }, (argv) => {
-        revertRepo(argv.commitId);
-    })
-    .help()
-    .strict(false);
+const { parser: cliParser } = require('./cli');
 
 const cliArgs = hideBin(process.argv);
-if (!cliArgs.length) {
+if (!cliArgs.length || cliArgs[0] === 'start') {
     startApp();
 } else {
-    argv.parse();
+    cliParser.parse();
 }
 
 function startApp() {
@@ -82,7 +44,8 @@ function startApp() {
         next();
     });
 
-    app.use(express.json());
+    app.use(express.json({ limit: '50mb' }));
+    app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
     const mongoURI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/github-clone';
     const mongoDnsFallbackServers = (process.env.MONGODB_DNS_FALLBACK_SERVERS || '8.8.8.8,8.8.4.4')
@@ -120,6 +83,15 @@ function startApp() {
 
     app.use(cors({ origin: '*' }));
     app.use('/', mainrouter);
+
+    app.use((err, req, res, next) => {
+        if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+            return res.status(413).json({
+                error: 'Payload Too Large: The commit payload exceeds the server limit of 50MB. Please commit fewer or smaller files.',
+            });
+        }
+        next(err);
+    });
 
     let user = 'test';
     const httpServer = http.createServer(app);

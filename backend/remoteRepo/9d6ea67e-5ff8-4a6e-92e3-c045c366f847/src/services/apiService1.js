@@ -1,0 +1,1 @@
+export async function fetchService1() { return fetch("/api/v1/service1").then(r => r.json()); }

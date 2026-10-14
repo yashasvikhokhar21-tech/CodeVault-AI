@@ -1,0 +1,42 @@
+<% layout('layouts/boilerplate') -%>
+
+<section class="hero">
+  <div class="d-flex align-items-center justify-content-between">
+    <div>
+      <h1 class="page-title">Explore the world with WanderLust</h1>
+      <p class="text-muted-custom">Discover unique stays, plan adventures, and share reviews from travelers around the globe.</p>
+      <div class="mt-3">
+        <a href="/listings" class="btn-accent btn btn-lg me-2">Browse Listings</a>
+  <a href="/listings/new" class="btn-accent btn btn-lg"><i class="fa-solid fa-plus me-2"></i>Create a Listing</a>
+      </div>
+    </div>
+    <div style="max-width:420px;"> 
+      <img src="https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=60" alt="travel" style="width:100%; border-radius: .75rem; box-shadow: 0 10px 30px rgba(20,20,50,0.06);">
+    </div>
+  </div>
+</section>
+
+<section class="mt-4">
+  <h2 class="page-title">Featured listings</h2>
+  <% if(listings && listings.length){ %>
+    <div class="listings-grid">
+      <% listings.forEach(function(listing){ %>
+        <a class="listing-link" href="/listings/<%= listing._id %>">
+          <div class="card listing-card">
+            <img src="<%= listing.image?.url || '/images/default-listing.jpg' %>" class="card-img-top" alt="<%= listing.title %>">
+            <div class="card-body p-3">
+              <h5 class="mb-1"><%= listing.title %></h5>
+              <p class="text-muted-custom"> <%= listing.location || listing.country || 'Unknown location' %></p>
+              <div class="d-flex justify-content-between align-items-center mt-2">
+                <strong>$<%= listing.price || '—' %></strong>
+                <span class="text-muted-custom">View</span>
+              </div>
+            </div>
+          </div>
+        </a>
+      <% }) %>
+    </div>
+  <% } else { %>
+    <p class="text-muted-custom">No listings yet — be the first to <a href="/listings/new" class="nav-link">create a listing</a>.</p>
+  <% } %>
+</section>

@@ -2,7 +2,7 @@ import { useState } from "react";
 import api from "../../api";
 import { useAuth } from "../../useAuth";
 import "./auth.css";
-
+import { AlertIcon } from "@primer/octicons-react";
 import { Link } from "react-router-dom";
 
 const Login = () => {
@@ -36,7 +36,7 @@ const Login = () => {
 
       window.location.href = "/";
     } catch (err) {
-      setError(err?.response?.data?.message || "Login failed. Check your credentials.");
+      setError(err?.response?.data?.message || (!err?.response ? "Network error. Unable to connect to server." : "Login failed. Check your credentials."));
     } finally {
       setLoading(false);
     }
@@ -59,7 +59,10 @@ const Login = () => {
             className="auth-input"
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (error) setError("");
+            }}
           />
 
           <label>Password</label>
@@ -70,10 +73,18 @@ const Login = () => {
             className="auth-input"
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (error) setError("");
+            }}
           />
 
-          {error && <div className="auth-message error">{error}</div>}
+          {error && (
+            <div className="auth-message error" role="alert">
+              <AlertIcon size={16} className="error-icon" />
+              <span>{error}</span>
+            </div>
+          )}
 
           <button type="submit" className="auth-btn" disabled={loading}>
             {loading ? "Signing in..." : "Sign in"}
